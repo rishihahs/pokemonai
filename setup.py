@@ -22,4 +22,9 @@ setup(
     url='https://github.com/rishihahs/pokemonai',
     license=license,
     packages=find_packages(exclude=('bin')),
+    entry_points={
+        'console_scripts': [
+            'pokemonai = pokemonai.__main__:main'
+        ]
+    },
 )
