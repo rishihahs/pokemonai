@@ -4,12 +4,14 @@ import websockets
 import json
 import re
 
+from pokemonai.smogon.battle import BattleHandler
+
 SMOGON_WEBSOCKET_URI = 'ws://sim.smogon.com:8000/showdown/websocket'
 SMOGON_ACTION_URL = 'http://play.pokemonshowdown.com/action.php'
 SMOGON_USERNAME = 'gdelta'
 SMOGON_PASSWORD = 'gebiet'
 
-SMOGON_TEAM = '|togekiss|normaliumz|1|airslash,ancientpower,yawn,roost|Modest|240,,,252,,16||,0,,,,|||]|mimikyu|mentalherb||trickroom,destinybond,painsplit,shadowsneak||||,,,,,0||1|]|torkoal|firiumz|1|fireblast,|Modest|4,,,252,252,||,0,,,,|||'
+SMOGON_TEAM = '|togekiss|choicescarf|1|airslash,ancientpower,trick,roost|Timid|,,,252,4,252||,0,,,,|||]|mimikyu|mentalherb||trickroom,destinybond,painsplit,shadowsneak||||,,,,,0||1|]|torkoal|firiumz|1|fireblast,|Modest|4,,,252,252,||,0,,,,|||'
 
 MAX_PARALLEL_GAMES = 1
 
@@ -25,7 +27,7 @@ async def run():
 
         while True:
             while len(pool) < MAX_PARALLEL_GAMES:
-                # Preload connection for SmogonController so that it receives messages
+                # Preload connection for battle so that it receives messages
                 conn = await _open_connection()
 
                 # Start Smogon battle search
@@ -43,8 +45,8 @@ async def run():
                 roomid = m.group(1)
 
                 # Start battle handler with preloaded connection
-                sc = SmogonController(roomid)
-                pool.add(asyncio.ensure_future(sc.battle(conn)))
+                bh = BattleHandler(roomid, SMOGON_USERNAME)
+                pool.add(asyncio.ensure_future(_battle(conn, bh)))
 
             # Wait for battle handlers to complete
             done, _ = await asyncio.wait(pool, return_when=asyncio.FIRST_COMPLETED)
@@ -110,19 +112,26 @@ async def _open_connection():
     return websocket
 
 
-class SmogonController(object):
+"""
+Communicates with Smogon about battle
+NOTE: Closes given websocket on completion
+"""
+async def _battle(websocket, battlehandler):
+    try:
+        # Start the battle timer
+        await websocket.send('%s|/timer on' % battlehandler.roomid)
 
-    def __init__(self, roomid):
-        self.roomid = roomid
+        while True:
+            msg = await websocket.recv()
+            if msg.startswith('>' + battlehandler.roomid):
+                print(msg)
+                response, done = battlehandler.parse(msg)
 
-    async def battle(self, websocket):
-        try:
-            while True:
-                msg = await websocket.recv()
-                if msg.startswith('>' + self.roomid):
+                if response:
+                    await websocket.send('%s|%s' % (battlehandler.roomid, response))
 
-                    if '|win|' in msg or '|lose|' in msg:
-                        break
-        finally:
-            await websocket.close()
+                if done:
+                    break
+    finally:
+        await websocket.close()
 
