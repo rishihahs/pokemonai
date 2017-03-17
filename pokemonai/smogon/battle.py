@@ -1,7 +1,11 @@
 from typing import Tuple, Optional, Sequence, Any
+import pkgutil
 import json
 import re
 import random
+
+# Load pokedex
+pokedex = json.loads(pkgutil.get_data('pokemonai', 'data/pokedex.json'))
 
 # Extract JSON from Smogon action request
 request_regex = re.compile(r"\|request\|(.+?)$")
@@ -9,6 +13,8 @@ request_regex = re.compile(r"\|request\|(.+?)$")
 player_regex = re.compile(r"\|player\|(.+?)\|(.+?)\|")
 # Extract opponent's pokemon
 poke_regex = lambda pid: "\\|poke\\|%s\\|(.+?)\\|" % pid
+# Extract active pokemon
+switch_regex = lambda pid: "\\|switch\\|%s.+?\\|(.+?)\\|" % pid
 
 class BattleHandler(object):
 
@@ -17,6 +23,7 @@ class BattleHandler(object):
         self.username = username
         self.pid = None # Player id in game
         self.opponent_pid = None # Opponent player id in game
+        self.battledata = BattleData()
 
 
     def parse(self, message: str) -> Tuple[Optional[str], bool]:
@@ -37,9 +44,13 @@ class BattleHandler(object):
         if '|poke|' in message:
             assert(self.opponent_pid) # We should already know their pid
             matches = re.finditer(poke_regex(self.opponent_pid), message)
-            for m in matches:
-                pokemon = m.group(1)
-                print('\x1b[6;30;42m' + pokemon + '\x1b[0m')
+            self.battledata.record_opponent_team([m.group(1) for m in matches])
+            print(self.battledata.opponent_team)
+
+        # Extract active pokemon
+        if '|switch|' in message:
+            m = re.search(switch_regex(self.opponent_pid), message)
+            self.battledata.record_opponent_active(m.group(1))
 
         # Smogon is requesting an action or switch
         if '|request|' in message:
@@ -74,5 +85,43 @@ class BattleHandler(object):
 class BattleData(object):
 
     def __init__(self):
-        pass
+        self.player_team = [] # Our team
+        self.player_active = None # Our active pokemon in battle
+        self.opponent_team = []
+        self.opponent_active = None
+
+    """
+    Given a Smogon pokemon description,
+    sets that opponent's active pokemon
+    """
+    def record_opponent_active(self, pokemon: str) -> None:
+        attrs = pokemon.split(',')
+        pokeid = attrs[0].lower().replace('-', '')
+        self.opponent_active = any(p for p in self.opponent_team if p['id'] == pokeid)
+
+    """
+    Given a list of Smogon pokemon descriptions (i.e. from team preview)
+    cross references with pokedex to record opponent's team
+    """
+    def record_opponent_team(self, pokemon: Sequence[str]) -> None:
+        normalized = [] # Normalized names to index into pokedex
+        genders = []
+        for p in pokemon:
+            attrs = p.split(',')
+            normalized.append(attrs[0].lower().replace('-', ''))
+            genders.append(attrs[1] if 1 < len(attrs) else None) # Gender or None if no gender
+
+        # Set opponent's team
+        self.opponent_team = []
+        for idx, name in enumerate(normalized):
+            poke = pokedex[name]
+            self.opponent_team.append({
+                'baseStats': poke['baseStats'],
+                'weightkg': poke['weightkg'],
+                'types': poke['types'],
+                'species': poke['species'],
+                'gender': genders[idx],
+                'id': name
+            })
+
 

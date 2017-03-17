@@ -124,7 +124,7 @@ async def _battle(websocket, battlehandler):
         while True:
             msg = await websocket.recv()
             if msg.startswith('>' + battlehandler.roomid):
-                print(msg)
+                #print(msg)
                 response, done = battlehandler.parse(msg)
 
                 if response:
